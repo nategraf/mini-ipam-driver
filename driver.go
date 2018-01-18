@@ -5,6 +5,7 @@ import (
     "net"
     "github.com/docker/libnetwork/types"
     "github.com/docker/go-plugins-helpers/ipam"
+    "github.com/nategraf/mini-ipam-driver/allocator"
 )
 
 var (
@@ -15,13 +16,13 @@ var (
 
 const socketAddress = "/run/docker/plugins/mini.sock"
 
-type allocator struct{}
+type driver struct{}
 
-func (a *allocator) GetDefaultAddressSpaces() (*ipam.AddressSpacesResponse, error) {
+func (d *driver) GetDefaultAddressSpaces() (*ipam.AddressSpacesResponse, error) {
 	return &ipam.AddressSpacesResponse{ defaultAS, defaultAS }, nil
 }
 
-func (a *allocator) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPoolResponse, error) {
+func (d *driver) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPoolResponse, error) {
 	if req.AddressSpace != defaultAS {
 		return &ipam.RequestPoolResponse{ "", "", nil }, types.BadRequestErrorf("unknown address space: %s", req.AddressSpace)
 	}
@@ -40,30 +41,30 @@ func (a *allocator) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPool
 	return &ipam.RequestPoolResponse{ defaultPoolID, pool.String(), nil }, nil
 }
 
-func (a *allocator) ReleasePool(req *ipam.ReleasePoolRequest) error {
+func (d *driver) ReleasePool(req *ipam.ReleasePoolRequest) error {
 	return nil
 }
 
-func (a *allocator) RequestAddress(req *ipam.RequestAddressRequest) (*ipam.RequestAddressResponse, error) {
+func (d *driver) RequestAddress(req *ipam.RequestAddressRequest) (*ipam.RequestAddressResponse, error) {
 	if req.PoolID != defaultPoolID {
 		return &ipam.RequestAddressResponse{ "", nil }, types.BadRequestErrorf("unknown pool id: %s", req.PoolID)
 	}
 	return &ipam.RequestAddressResponse{ "0.0.0.0/0", nil }, nil
 }
 
-func (a *allocator) ReleaseAddress(req *ipam.ReleaseAddressRequest) error {
+func (d *driver) ReleaseAddress(req *ipam.ReleaseAddressRequest) error {
 	if req.PoolID != defaultPoolID {
 		return types.BadRequestErrorf("unknown pool id: %s", req.PoolID)
 	}
 	return nil
 }
 
-func (a *allocator) GetCapabilities() (*ipam.CapabilitiesResponse, error) {
+func (d *driver) GetCapabilities() (*ipam.CapabilitiesResponse, error) {
     return &ipam.CapabilitiesResponse{ RequiresMACAddress: false }, nil
 }
 
 func main() {
-    a := &allocator{}
-    h := ipam.NewHandler(a)
+    d := &driver{}
+    h := ipam.NewHandler(d)
     h.ServeUnix(socketAddress, 0)
 }
