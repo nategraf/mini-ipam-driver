@@ -2,30 +2,46 @@ package allocator
 
 import (
     "net"
+    "github.com/nategraf/mini-ipam-driver/bytop"
 )
 
 // Allocator is simplified interface for managing IP addresses.
 type Allocator interface {
-    AddPool(net.IPNet)
-    RequestPool(int) net.IPNet
-    ReleasePool(net.IPNet)
-    RequestAddress(net.IPNet) net.IP
-    ReleaseAddress(net.IPNet, net.IP)
+    addrSpace() string
+
+    AddPool(*net.IPNet)
+    RequestPool(int) *net.IPNet
+    ReleasePool(*net.IPNet)
+    RequestAddress(*net.IPNet, net.IP) net.IP
+    ReleaseAddress(net.IP)
+}
+
+const NilAS = "null"
+
+func AddrSpace(a Allocator) string {
+    if a == nil {
+        return NilAS
+    }
+    return a.addrSpace()
 }
 
 // LocalAllocator is an allocator which stores data in process memory.
 // It does not use an external data store and therefore cannot be used across a cluster.
 type LocalAllocator struct{
     pools [][]*net.IPNet
-    addrs map[string]bool
+    allocated map[string]bool
 }
 
 // NewLocalAllocator creates and initializes a new LocalAllocator
 func NewLocalAllocator() *LocalAllocator {
     return &LocalAllocator{
         pools: make([][]*net.IPNet, 32),
-        addrs: make(map[string]bool),
+        allocated: make(map[string]bool),
     }
+}
+
+func (a *LocalAllocator) addrSpace() string {
+    return "local"
 }
 
 // AddPool adds a new subnet to be used in allocations.
@@ -73,31 +89,57 @@ func (a *LocalAllocator) RequestPool(masklen int) *net.IPNet {
         a.pools[i+1] = append(a.pools[i+1], extrapool)
     }
 
+    a.allocated[pool.String()] = true
     return pool
 }
 
-/* Currently not needed
-func max(x, y int) int {
-    if x > y {
-        return x
+func (a *LocalAllocator) ReleasePool(pool *net.IPNet) {
+    if a.allocated[pool.String()] {
+        a.AddPool(pool)
+        delete(a.allocated, pool.String())
     }
-    return y
 }
 
-func arrAnd(a, b []byte) []byte {
-    res = make([]byte, max(len(a), len(b)))
-    for i, _ := range res {
-        res[i] = 0xFF
-        if i < len(a) {
-            res[i] &= a[i]
-        }
-        if i < len(b) {
-            res[i] &= b[i]
-        }
+func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) net.IP {
+    // Make sure we allocated this pool
+    if !a.allocated[pool.String()] {
+        return nil
     }
-    return res
+
+    // Is this a specific ip request or do we choose?
+    if ip != nil {
+        if pool.Contains(ip) && !a.allocated[ip.String()] {
+            a.allocated[ip.String()] = true
+            return ip
+        }
+
+        return nil
+    } else {
+        ip = pool.IP.To4()
+        if ip == nil {
+            // Not a v4 address
+            return nil
+        }
+
+        // Find the highest address in the pool (broadcast address)
+        limit := bytop.Or(bytop.Not(pool.Mask, nil), ip, nil)
+        bytop.Add(ip, 1, ip) // Add one to get past network address
+        for ; !bytop.Equal(ip, limit); bytop.Add(ip, 1, ip) {
+            if !a.allocated[ip.String()] {
+                a.allocated[ip.String()] = true
+                return ip
+            }
+        }
+
+        // Pool must be full
+        return nil
+    }
 }
-*/
+func (a *LocalAllocator) ReleaseAddress(ip net.IP) {
+    if a.allocated[ip.String()] {
+        delete(a.allocated, ip.String())
+    }
+}
 
 func copyIPNet(ipnet *net.IPNet) *net.IPNet {
     ip := make(net.IP, len(ipnet.IP))
@@ -105,12 +147,6 @@ func copyIPNet(ipnet *net.IPNet) *net.IPNet {
     copy(ip, ipnet.IP)
     copy(mask, ipnet.Mask)
     return &net.IPNet{ IP: ip, Mask: mask }
-}
-
-// Flips a bit at the index, which is from left to right (most signifcant to least)
-func flipBit(index int, s []byte) {
-    i, j := index / 8, index % 8
-    s[i] ^= 1 << uint(7 - j)
 }
 
 func splitPool(pool *net.IPNet) (*net.IPNet, *net.IPNet) {
@@ -123,9 +159,9 @@ func splitPool(pool *net.IPNet) (*net.IPNet, *net.IPNet) {
     left := copyIPNet(pool)
     right := copyIPNet(pool)
 
-    flipBit(masklen, right.IP)   //Flip the bit to create a new network
-    flipBit(masklen, right.Mask) // Lengthen the mask by 1
-    flipBit(masklen, left.Mask)  // Lengthen the mask by 1
+    bytop.FlipBit(masklen, right.IP)   //Flip the bit to create a new network
+    bytop.FlipBit(masklen, right.Mask) // Lengthen the mask by 1
+    bytop.FlipBit(masklen, left.Mask)  // Lengthen the mask by 1
 
     return left, right
 }
