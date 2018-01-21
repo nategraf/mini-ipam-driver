@@ -136,7 +136,8 @@ func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) net.IP {
     }
 }
 func (a *LocalAllocator) ReleaseAddress(ip net.IP) {
-    if a.allocated[ip.String()] {
+    ip = ip.To4()
+    if ip != nil && a.allocated[ip.String()] {
         delete(a.allocated, ip.String())
     }
 }

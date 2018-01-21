@@ -10,7 +10,7 @@ import (
 )
 
 var (
-    defaultPool, _ = types.ParseCIDR("0.0.0.0/0")
+    defaultPools = parsePools([]string{"172.16.0.0/16"})
     poolIdRe = regexp.MustCompile("([a-zA-Z0-9_]+):([a-zA-Z0-9./]+)")
 )
 
@@ -23,12 +23,24 @@ const (
     unknownAsMsg = "unknown address space: %s"
     nilAllocatorMsg = "cannot make requests to the nil address space"
     brokenIdMsg = "unable to parse pool ID: %s"
+    brokenIpMsg = "unable to parse ip address: %s"
     exhaustedMsg = "address space does not contain an unallocated suitable pool"
 )
 
 type driver struct {
     Local alloc.Allocator
     Global alloc.Allocator
+}
+
+func parsePools(strs []string) []*net.IPNet {
+    var res []*net.IPNet
+    for _, str := range strs {
+        _, pool, err := net.ParseCIDR(str)
+        if pool != nil && err != nil {
+            res = append(res, pool)
+        }
+    }
+    return res
 }
 
 func poolToId(as string, pool *net.IPNet) string {
@@ -43,7 +55,11 @@ func idToPool(id string) (string, *net.IPNet) {
     }
 
     as := m[1]
-    _, pool, _ := net.ParseCIDR(m[2])
+    _, pool, err := net.ParseCIDR(m[2])
+    if err != nil {
+        return "", nil
+    }
+
     return as, pool
 }
 
@@ -79,6 +95,9 @@ func (d *driver) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPoolRes
     }
 
     pool := a.RequestPool(defaultMasklen)
+    if pool == nil {
+        return nil, types.BadRequestErrorf(exhaustedMsg)
+    }
     return &ipam.RequestPoolResponse{ poolToId(req.AddressSpace, pool), pool.String(), nil }, nil
 }
 
@@ -108,8 +127,22 @@ func (d *driver) RequestAddress(req *ipam.RequestAddressRequest) (*ipam.RequestA
         return nil, err
     }
 
-    ip, _, _ := net.ParseCIDR(req.Address)
-    return &ipam.RequestAddressResponse{ a.RequestAddress(pool, ip.To4()).String(), nil }, nil
+    var ip net.IP
+    if req.Address != "" {
+        var err error
+        ip, _, err = net.ParseCIDR(req.Address)
+        if err != nil {
+            return nil, types.BadRequestErrorf(brokenIpMsg, req.Address)
+        }
+    } else {
+        ip = nil
+    }
+
+    ip = a.RequestAddress(pool, ip)
+    if ip == nil {
+        return nil, types.BadRequestErrorf(exhaustedMsg)
+    }
+    return &ipam.RequestAddressResponse{ ip.String(), nil }, nil
 }
 
 func (d *driver) ReleaseAddress(req *ipam.ReleaseAddressRequest) error {
@@ -123,8 +156,11 @@ func (d *driver) ReleaseAddress(req *ipam.ReleaseAddressRequest) error {
         return err
     }
 
-    ip, _, _ := net.ParseCIDR(req.Address)
-    a.ReleaseAddress(ip.To4())
+    ip, _, err := net.ParseCIDR(req.Address)
+    if err != nil || ip == nil {
+        return types.BadRequestErrorf(brokenIpMsg, req.Address)
+    }
+    a.ReleaseAddress(ip)
     return nil
 }
 
@@ -133,7 +169,10 @@ func (d *driver) GetCapabilities() (*ipam.CapabilitiesResponse, error) {
 }
 
 func main() {
-    d := &driver{ alloc.NewLocalAllocator(), nil }
+    d := &driver{ Local: alloc.NewLocalAllocator(), Global: nil }
+    for _, pool := range defaultPools {
+        d.Local.AddPool(pool)
+    }
     h := ipam.NewHandler(d)
     h.ServeUnix(socketAddress, 0)
 }
