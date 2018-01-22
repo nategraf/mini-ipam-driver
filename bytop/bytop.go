@@ -37,6 +37,7 @@ func Or(a, b, dst []byte) []byte {
     if dst == nil {
         dst = make([]byte, max(len(a), len(b)))
     }
+
     for i, _ := range dst {
         dst[i] = 0x00
         if i < len(a) {
@@ -55,9 +56,9 @@ func Add(a []byte, n int32, dst []byte) []byte {
     }
 
     // Assume big-endian (network order) as that is how net.IP is arranged
-    carry := uint32(0)
-    for i := uint32(len(dst)-1); i >= 0; i-- {
-        carry += uint32(int32(a[i]) + n)
+    carry := n
+    for i := len(dst)-1; i >= 0; i-- {
+        carry += int32(a[i])
         dst[i], carry = byte(carry % 0xFF), carry / 0xFF
     }
 

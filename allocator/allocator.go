@@ -1,6 +1,7 @@
 package allocator
 
 import (
+    "fmt"
     "net"
     "github.com/nategraf/mini-ipam-driver/bytop"
 )
@@ -9,11 +10,11 @@ import (
 type Allocator interface {
     addrSpace() string
 
-    AddPool(*net.IPNet)
-    RequestPool(int) *net.IPNet
-    ReleasePool(*net.IPNet)
-    RequestAddress(*net.IPNet, net.IP) net.IP
-    ReleaseAddress(net.IP)
+    AddPool(*net.IPNet) error
+    RequestPool(int) (*net.IPNet, error)
+    ReleasePool(*net.IPNet) error
+    RequestAddress(*net.IPNet, net.IP) (net.IP, error)
+    ReleaseAddress(net.IP) error
 }
 
 const NilAS = "null"
@@ -45,41 +46,41 @@ func (a *LocalAllocator) addrSpace() string {
 }
 
 // AddPool adds a new subnet to be used in allocations.
-func (a *LocalAllocator) AddPool(pool *net.IPNet) {
+func (a *LocalAllocator) AddPool(pool *net.IPNet) error {
     masklen, addrlen := pool.Mask.Size()
 
     if addrlen != 32 {
         // This is not a proper IPv4 subnet. Abort!
-        return
+        return fmt.Errorf("Only 32-bit IPv4 subnets can be added")
     }
 
     a.pools[masklen] = append(a.pools[masklen], pool)
+    return nil
 }
 
 // RequestPool allocates a pool of the requested size.
 // nil is returned if the request cannnot be fulfiled.
-func (a *LocalAllocator) RequestPool(masklen int) *net.IPNet {
+func (a *LocalAllocator) RequestPool(masklen int) (*net.IPNet, error) {
     var pool *net.IPNet
     var i int
 
     if masklen < 0 || masklen > 31 {
-        return nil
+        return nil, fmt.Errorf("Masklen must be in the interval [0, 31]")
     }
 
     // Search up the pool lists for a large enough pool
     for i = masklen; i >= 0; i-- {
         s := a.pools[i]
-        if s == nil || len(s) == 0 {
-            continue
+        if len(s) > 0 {
+            // Pop head
+            pool, a.pools[i] = s[0], s[1:]
+            break
         }
-
-        // Pop head
-        pool, a.pools[i] = s[0], s[1:]
     }
 
     // If we didn't find a large enough pool return nil
     if pool == nil {
-        return nil
+        return nil, fmt.Errorf("No pool availible to allocate a /%d subnet", masklen)
     }
 
     // Split the pool until we have the correct size
@@ -90,35 +91,38 @@ func (a *LocalAllocator) RequestPool(masklen int) *net.IPNet {
     }
 
     a.allocated[pool.String()] = true
-    return pool
+    return pool, nil
 }
 
-func (a *LocalAllocator) ReleasePool(pool *net.IPNet) {
+func (a *LocalAllocator) ReleasePool(pool *net.IPNet) error {
     if a.allocated[pool.String()] {
         a.AddPool(pool)
         delete(a.allocated, pool.String())
+        return nil
+    } else {
+        return fmt.Errorf("Pool was never allocated: %s", pool.String())
     }
 }
 
-func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) net.IP {
+func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) (net.IP, error) {
     // Make sure we allocated this pool
     if !a.allocated[pool.String()] {
-        return nil
+        return nil, fmt.Errorf("Pool was never allocated: %s, pool.String()")
     }
 
     // Is this a specific ip request or do we choose?
     if ip != nil {
         if pool.Contains(ip) && !a.allocated[ip.String()] {
             a.allocated[ip.String()] = true
-            return ip
+            return ip, nil
         }
 
-        return nil
+        return nil, fmt.Errorf("Cannot allocate %s from pool %s", ip.String(), pool.String())
     } else {
         ip = pool.IP.To4()
         if ip == nil {
             // Not a v4 address
-            return nil
+            return nil, fmt.Errorf("Pool is not a valid IPv4 subet: %s", pool.String())
         }
 
         // Find the highest address in the pool (broadcast address)
@@ -127,18 +131,25 @@ func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) net.IP {
         for ; !bytop.Equal(ip, limit); bytop.Add(ip, 1, ip) {
             if !a.allocated[ip.String()] {
                 a.allocated[ip.String()] = true
-                return ip
+                return ip, nil
             }
         }
 
         // Pool must be full
-        return nil
+        return nil, fmt.Errorf("Pool is exhausted: %s", pool.String())
     }
 }
-func (a *LocalAllocator) ReleaseAddress(ip net.IP) {
+func (a *LocalAllocator) ReleaseAddress(ip net.IP) error {
     ip = ip.To4()
-    if ip != nil && a.allocated[ip.String()] {
+    if ip == nil {
+        return fmt.Errorf("Given IP address is not a valid IPv4 address: %s", ip.String())
+    }
+
+    if a.allocated[ip.String()] {
         delete(a.allocated, ip.String())
+        return nil
+    } else {
+        return fmt.Errorf("IP address was never allocated: %s", ip.String())
     }
 }
 

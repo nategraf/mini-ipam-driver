@@ -4,6 +4,7 @@ import (
     "fmt"
     "net"
     "regexp"
+    "log"
     "github.com/docker/libnetwork/types"
     "github.com/docker/go-plugins-helpers/ipam"
     alloc "github.com/nategraf/mini-ipam-driver/allocator"
@@ -36,7 +37,7 @@ func parsePools(strs []string) []*net.IPNet {
     var res []*net.IPNet
     for _, str := range strs {
         _, pool, err := net.ParseCIDR(str)
-        if pool != nil && err != nil {
+        if pool != nil && err == nil {
             res = append(res, pool)
         }
     }
@@ -44,7 +45,7 @@ func parsePools(strs []string) []*net.IPNet {
 }
 
 func poolToId(as string, pool *net.IPNet) string {
-    return fmt.Sprintf("%s:%s")
+    return fmt.Sprintf("%s:%s", as, pool.String())
 }
 
 func idToPool(id string) (string, *net.IPNet) {
@@ -94,9 +95,9 @@ func (d *driver) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPoolRes
         return nil, err
     }
 
-    pool := a.RequestPool(defaultMasklen)
-    if pool == nil {
-        return nil, types.BadRequestErrorf(exhaustedMsg)
+    pool, err := a.RequestPool(defaultMasklen)
+    if err != nil {
+        return nil, types.BadRequestErrorf("Allocation failed: %s", err)
     }
     return &ipam.RequestPoolResponse{ poolToId(req.AddressSpace, pool), pool.String(), nil }, nil
 }
@@ -112,7 +113,10 @@ func (d *driver) ReleasePool(req *ipam.ReleasePoolRequest) error {
         return err
     }
 
-    a.ReleasePool(pool)
+    err = a.ReleasePool(pool)
+    if err != nil {
+        return types.BadRequestErrorf("Release failed: %s", err)
+    }
     return nil
 }
 
@@ -138,11 +142,16 @@ func (d *driver) RequestAddress(req *ipam.RequestAddressRequest) (*ipam.RequestA
         ip = nil
     }
 
-    ip = a.RequestAddress(pool, ip)
-    if ip == nil {
-        return nil, types.BadRequestErrorf(exhaustedMsg)
+    ip, err = a.RequestAddress(pool, ip)
+    if err != nil {
+        return nil, types.BadRequestErrorf("Allocation failed: %s", err)
     }
-    return &ipam.RequestAddressResponse{ ip.String(), nil }, nil
+
+    // Create a copy of the pool to insert our ip and return
+    res := *pool
+    res.IP = ip
+
+    return &ipam.RequestAddressResponse{ pool.String(), nil }, nil
 }
 
 func (d *driver) ReleaseAddress(req *ipam.ReleaseAddressRequest) error {
@@ -160,7 +169,10 @@ func (d *driver) ReleaseAddress(req *ipam.ReleaseAddressRequest) error {
     if err != nil || ip == nil {
         return types.BadRequestErrorf(brokenIpMsg, req.Address)
     }
-    a.ReleaseAddress(ip)
+    err = a.ReleaseAddress(ip)
+    if err != nil {
+        return types.BadRequestErrorf("Release failed: %s", err)
+    }
     return nil
 }
 
@@ -171,7 +183,11 @@ func (d *driver) GetCapabilities() (*ipam.CapabilitiesResponse, error) {
 func main() {
     d := &driver{ Local: alloc.NewLocalAllocator(), Global: nil }
     for _, pool := range defaultPools {
-        d.Local.AddPool(pool)
+        err := d.Local.AddPool(pool)
+        if err != nil {
+            log.Fatalf("Failed to add pool: %s", pool.String())
+        }
+        log.Printf("Added pool to allocator: %s", pool.String())
     }
     h := ipam.NewHandler(d)
     h.ServeUnix(socketAddress, 0)
