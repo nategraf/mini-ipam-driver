@@ -33,6 +33,11 @@ type driver struct {
     Global alloc.Allocator
 }
 
+func logError(fname string, err error) error {
+    log.Printf("[FAILED] %s: %s", fname, err)
+    return err
+}
+
 func parsePools(strs []string) []*net.IPNet {
     var res []*net.IPNet
     for _, str := range strs {
@@ -79,64 +84,70 @@ func (d *driver) asToAllocator(as string) (alloc.Allocator, error) {
 }
 
 func (d *driver) GetDefaultAddressSpaces() (*ipam.AddressSpacesResponse, error) {
-    return &ipam.AddressSpacesResponse{ alloc.AddrSpace(d.Local), alloc.AddrSpace(d.Global) }, nil
+    res := &ipam.AddressSpacesResponse{ alloc.AddrSpace(d.Local), alloc.AddrSpace(d.Global) }
+    log.Printf("GetCapabilities(): %s", res)
+    return res, nil
 }
 
 func (d *driver) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPoolResponse, error) {
     if req.V6 {
-        return nil, types.BadRequestErrorf(v6UnsupportedMsg)
+        return nil, logError("RequestPool", types.BadRequestErrorf(v6UnsupportedMsg))
     }
     if req.Pool != "" || req.SubPool != "" {
-        return nil, types.BadRequestErrorf(reqPoolUnsupportedMsg)
+        return nil, logError("RequestPool", types.BadRequestErrorf(reqPoolUnsupportedMsg))
     }
 
     a, err := d.asToAllocator(req.AddressSpace)
     if err != nil {
-        return nil, err
+        return nil, logError("RequestPool", err)
     }
 
     pool, err := a.RequestPool(defaultMasklen)
     if err != nil {
-        return nil, types.BadRequestErrorf("Allocation failed: %s", err)
+        return nil, logError("RequestPool", types.InternalErrorf("Allocation failed: %s", err))
     }
-    return &ipam.RequestPoolResponse{ poolToId(req.AddressSpace, pool), pool.String(), nil }, nil
+
+    res := &ipam.RequestPoolResponse{ poolToId(req.AddressSpace, pool), pool.String(), nil }
+    log.Printf("RequestPool(%s): %s", req, res)
+    return res, nil
 }
 
 func (d *driver) ReleasePool(req *ipam.ReleasePoolRequest) error {
     as, pool := idToPool(req.PoolID)
     if pool == nil {
-        return types.BadRequestErrorf(brokenIdMsg, req.PoolID)
+        return logError("ReleasePool", types.BadRequestErrorf(brokenIdMsg, req.PoolID))
     }
 
     a, err := d.asToAllocator(as)
     if err != nil {
-        return err
+        return logError("ReleasePool", err)
     }
 
     err = a.ReleasePool(pool)
     if err != nil {
-        return types.BadRequestErrorf("Release failed: %s", err)
+        return logError("ReleasePool", types.InternalErrorf("Release failed: %s", err))
     }
+
+    log.Printf("ReleasePool(%s)", req)
     return nil
 }
 
 func (d *driver) RequestAddress(req *ipam.RequestAddressRequest) (*ipam.RequestAddressResponse, error) {
     as, pool := idToPool(req.PoolID)
     if pool == nil {
-        return nil, types.BadRequestErrorf(brokenIdMsg, req.PoolID)
+        return nil, logError("RequestAddress", types.BadRequestErrorf(brokenIdMsg, req.PoolID))
     }
 
     a, err := d.asToAllocator(as)
     if err != nil {
-        return nil, err
+        return nil, logError("RequestAddress", err)
     }
 
     var ip net.IP
     if req.Address != "" {
-        var err error
-        ip, _, err = net.ParseCIDR(req.Address)
-        if err != nil {
-            return nil, types.BadRequestErrorf(brokenIpMsg, req.Address)
+        ip = net.ParseIP(req.Address)
+        if ip == nil {
+            return nil, logError("RequestAddress", types.BadRequestErrorf(brokenIpMsg, req.Address))
         }
     } else {
         ip = nil
@@ -144,40 +155,43 @@ func (d *driver) RequestAddress(req *ipam.RequestAddressRequest) (*ipam.RequestA
 
     ip, err = a.RequestAddress(pool, ip)
     if err != nil {
-        return nil, types.BadRequestErrorf("Allocation failed: %s", err)
+        return nil, logError("RequestAddress", types.InternalErrorf("Allocation failed: %s", err))
     }
 
-    // Create a copy of the pool to insert our ip and return
-    res := *pool
-    res.IP = ip
+    pool.IP = ip
 
-    return &ipam.RequestAddressResponse{ pool.String(), nil }, nil
+    res := &ipam.RequestAddressResponse{ pool.String(), nil }
+    log.Printf("RequestAddress(%s): %s", req, res)
+    return res, nil
 }
 
 func (d *driver) ReleaseAddress(req *ipam.ReleaseAddressRequest) error {
     as, pool := idToPool(req.PoolID)
     if pool == nil {
-        return types.BadRequestErrorf(brokenIdMsg, req.PoolID)
+        return logError("ReleaseAddress", types.BadRequestErrorf(brokenIdMsg, req.PoolID))
     }
 
     a, err := d.asToAllocator(as)
     if err != nil {
-        return err
+        return logError("ReleaseAddress", err)
     }
 
-    ip, _, err := net.ParseCIDR(req.Address)
-    if err != nil || ip == nil {
-        return types.BadRequestErrorf(brokenIpMsg, req.Address)
+    ip := net.ParseIP(req.Address)
+    if ip == nil {
+        return logError("ReleaseAddress", types.BadRequestErrorf(brokenIpMsg, req.Address))
     }
     err = a.ReleaseAddress(ip)
     if err != nil {
-        return types.BadRequestErrorf("Release failed: %s", err)
+        return logError("ReleaseAddress", types.InternalErrorf("Release failed: %s", err))
     }
+    log.Printf("ReleaseAddress(%s)", req)
     return nil
 }
 
 func (d *driver) GetCapabilities() (*ipam.CapabilitiesResponse, error) {
-    return &ipam.CapabilitiesResponse{ RequiresMACAddress: false }, nil
+    res := &ipam.CapabilitiesResponse{ RequiresMACAddress: false }
+    log.Printf("GetCapabilities(): %s", res)
+    return res, nil
 }
 
 func main() {

@@ -107,7 +107,7 @@ func (a *LocalAllocator) ReleasePool(pool *net.IPNet) error {
 func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) (net.IP, error) {
     // Make sure we allocated this pool
     if !a.allocated[pool.String()] {
-        return nil, fmt.Errorf("Pool was never allocated: %s, pool.String()")
+        return nil, fmt.Errorf("Pool was never allocated: %s", pool.String())
     }
 
     // Is this a specific ip request or do we choose?
