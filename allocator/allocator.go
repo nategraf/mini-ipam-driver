@@ -54,7 +54,20 @@ func (a *LocalAllocator) AddPool(pool *net.IPNet) error {
         return fmt.Errorf("Only 32-bit IPv4 subnets can be added")
     }
 
-    a.pools[masklen] = append(a.pools[masklen], pool)
+    // Operate on a normalized copy of the origonal
+    pool = normalizePool(pool)
+
+    s := a.pools[masklen]
+    for i, pooli := range s {
+        if bytop.Equal(pool.IP, pooli.IP) {
+            return fmt.Errorf("Pool has already been added: %s", pool.String())
+        }
+        if masklen != 0 && bytop.Equal(pool.IP, adjacentPool(pooli).IP) {
+            a.pools[masklen] = append(s[:i], s[i+1:]...) // Remove the found pool from the list
+            return a.AddPool(expandPool(pool)) // "Merge" the two and add the result to the allocator
+        }
+    }
+    a.pools[masklen] = append(s, pool)
     return nil
 }
 
@@ -153,11 +166,34 @@ func (a *LocalAllocator) ReleaseAddress(ip net.IP) error {
     }
 }
 
-func copyIPNet(ipnet *net.IPNet) *net.IPNet {
-    ip := make(net.IP, len(ipnet.IP))
-    mask := make(net.IPMask, len(ipnet.Mask))
-    copy(ip, ipnet.IP)
-    copy(mask, ipnet.Mask)
+// Creates a copy of an ipnet, and ensures the IP component is the network address
+func normalizePool(ipnet *net.IPNet) *net.IPNet {
+    ip := bytop.And(ipnet.IP.To4(), ipnet.Mask, nil)
+    return &net.IPNet{ IP: ip, Mask: bytop.Copy(ipnet.Mask) }
+}
+
+// Given a normalized IPNet, return adjacent subnet
+// The adjacent subnet is the other subnet of it's size contained in the next larger subnet
+func adjacentPool(pool *net.IPNet) *net.IPNet {
+    masklen, _ := pool.Mask.Size()
+    if masklen <= 0 {
+        return nil
+    }
+
+    ip := bytop.Copy(pool.IP)
+    bytop.FlipBit(masklen-1, ip)
+    return &net.IPNet{ IP: ip, Mask: bytop.Copy(pool.Mask) }
+}
+
+// Expands a pool one size to fill the subnet double it's current size
+func expandPool(pool *net.IPNet) *net.IPNet {
+    masklen, addrlen := pool.Mask.Size()
+    if masklen <= 0 {
+        return nil
+    }
+
+    mask := net.CIDRMask(masklen-1, addrlen)
+    ip := bytop.And(pool.IP, mask, nil)
     return &net.IPNet{ IP: ip, Mask: mask }
 }
 
@@ -168,12 +204,26 @@ func splitPool(pool *net.IPNet) (*net.IPNet, *net.IPNet) {
         return nil, nil
     }
 
-    left := copyIPNet(pool)
-    right := copyIPNet(pool)
+    left := normalizePool(pool)
+    right := normalizePool(pool)
 
     bytop.FlipBit(masklen, right.IP)   //Flip the bit to create a new network
     bytop.FlipBit(masklen, right.Mask) // Lengthen the mask by 1
     bytop.FlipBit(masklen, left.Mask)  // Lengthen the mask by 1
 
     return left, right
+}
+
+func poolOverlap(a, b  *net.IPNet) bool {
+    if a == nil || b == nil {
+        return false
+    }
+
+    if a.Contains(bytop.And(b.IP.To4(), b.Mask, nil)) { // Check if the network addr of b is in a
+        return true
+    } else if b.Contains(bytop.And(a.IP.To4(), a.Mask, nil)) { // Check if the network addr of a is in b
+        return true
+    } else {
+        return false
+    }
 }

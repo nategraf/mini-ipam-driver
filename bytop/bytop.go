@@ -7,12 +7,22 @@ func max(x, y int) int {
     return y
 }
 
+func min(x, y int) int {
+    if x < y {
+        return x
+    }
+    return y
+}
+
 func Not(a, dst []byte) []byte {
     if dst == nil {
         dst = make([]byte, len(a))
     }
     for i, _ := range dst {
-        dst[i] = ^a[i]
+        dst[i] = 0x00
+        if i < len(a) {
+            dst[i] = ^a[i]
+        }
     }
     return dst
 }
@@ -58,7 +68,9 @@ func Add(a []byte, n int32, dst []byte) []byte {
     // Assume big-endian (network order) as that is how net.IP is arranged
     carry := n
     for i := len(dst)-1; i >= 0; i-- {
-        carry += int32(a[i])
+        if i < len(a) {
+            carry += int32(a[i])
+        }
         dst[i], carry = byte(carry % 0xFF), carry / 0xFF
     }
 
@@ -77,6 +89,12 @@ func Equal(a, b []byte) bool {
     }
 
     return true
+}
+
+func Copy(s []byte) []byte {
+    cpy := make([]byte, len(s))
+    copy(cpy, s)
+    return cpy
 }
 
 // Flips a bit at the index, which is from left to right (most signifcant to least)
