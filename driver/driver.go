@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "net"
+    "strconv"
     "regexp"
     "log"
     "github.com/docker/libnetwork/types"
@@ -102,7 +103,18 @@ func (d *driver) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPoolRes
         return nil, logError("RequestPool", err)
     }
 
-    pool, err := a.RequestPool(defaultMasklen)
+    val, found := req.Options["CidrMaskLength"]
+    var masklen int
+    if found {
+        masklen, err = strconv.Atoi(val)
+        if err != nil {
+            return nil, logError("RequestPool", err)
+        }
+    } else {
+        masklen = defaultMasklen
+    }
+
+    pool, err := a.RequestPool(masklen)
     if err != nil {
         return nil, logError("RequestPool", types.InternalErrorf("Allocation failed: %s", err))
     }
