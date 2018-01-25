@@ -3,6 +3,7 @@ package allocator
 import (
     "fmt"
     "net"
+    "sync"
     "github.com/nategraf/mini-ipam-driver/bytop"
 )
 
@@ -31,6 +32,7 @@ func AddrSpace(a Allocator) string {
 type LocalAllocator struct{
     pools [][]*net.IPNet
     allocated map[string]bool
+    lock sync.Mutex
 }
 
 // NewLocalAllocator creates and initializes a new LocalAllocator
@@ -38,6 +40,7 @@ func NewLocalAllocator() *LocalAllocator {
     return &LocalAllocator{
         pools: make([][]*net.IPNet, 32),
         allocated: make(map[string]bool),
+        lock: sync.Mutex{},
     }
 }
 
@@ -47,15 +50,22 @@ func (a *LocalAllocator) addrSpace() string {
 
 // AddPool adds a new subnet to be used in allocations.
 func (a *LocalAllocator) AddPool(pool *net.IPNet) error {
-    masklen, addrlen := pool.Mask.Size()
-
-    if addrlen != 32 {
+    if len(pool.Mask) != 4 {
         // This is not a proper IPv4 subnet. Abort!
         return fmt.Errorf("Only 32-bit IPv4 subnets can be added")
     }
 
+    a.lock.Lock()
+    defer a.lock.Unlock()
+
+    return a.addPoolNoLock(pool)
+}
+
+func (a *LocalAllocator) addPoolNoLock(pool *net.IPNet) error {
     // Operate on a normalized copy of the origonal
     pool = normalizePool(pool)
+
+    masklen, _ := pool.Mask.Size()
 
     s := a.pools[masklen]
     for i, pooli := range s {
@@ -64,7 +74,7 @@ func (a *LocalAllocator) AddPool(pool *net.IPNet) error {
         }
         if masklen != 0 && bytop.Equal(pool.IP, adjacentPool(pooli).IP) {
             a.pools[masklen] = append(s[:i], s[i+1:]...) // Remove the found pool from the list
-            return a.AddPool(expandPool(pool)) // "Merge" the two and add the result to the allocator
+            return a.addPoolNoLock(expandPool(pool)) // "Merge" the two and add the result to the allocator
         }
     }
     a.pools[masklen] = append(s, pool)
@@ -80,6 +90,9 @@ func (a *LocalAllocator) RequestPool(masklen int) (*net.IPNet, error) {
     if masklen < 0 || masklen > 31 {
         return nil, fmt.Errorf("Masklen must be in the interval [0, 31]")
     }
+
+    a.lock.Lock()
+    defer a.lock.Unlock()
 
     // Search up the pool lists for a large enough pool
     for i = masklen; i >= 0; i-- {
@@ -108,8 +121,11 @@ func (a *LocalAllocator) RequestPool(masklen int) (*net.IPNet, error) {
 }
 
 func (a *LocalAllocator) ReleasePool(pool *net.IPNet) error {
+    a.lock.Lock()
+    defer a.lock.Unlock()
+
     if a.allocated[pool.String()] {
-        a.AddPool(pool)
+        a.addPoolNoLock(pool)
         delete(a.allocated, pool.String())
         return nil
     } else {
@@ -118,6 +134,9 @@ func (a *LocalAllocator) ReleasePool(pool *net.IPNet) error {
 }
 
 func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) (net.IP, error) {
+    a.lock.Lock()
+    defer a.lock.Unlock()
+
     // Make sure we allocated this pool
     if !a.allocated[pool.String()] {
         return nil, fmt.Errorf("Pool was never allocated: %s", pool.String())
@@ -157,6 +176,9 @@ func (a *LocalAllocator) ReleaseAddress(ip net.IP) error {
     if ip == nil {
         return fmt.Errorf("Given IP address is not a valid IPv4 address: %s", ip.String())
     }
+
+    a.lock.Lock()
+    defer a.lock.Unlock()
 
     if a.allocated[ip.String()] {
         delete(a.allocated, ip.String())
