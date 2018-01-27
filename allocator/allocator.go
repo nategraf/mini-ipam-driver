@@ -261,6 +261,7 @@ func (a *LocalAllocator) autosave() error {
         a.update.L.Lock()
         for !a.updated {
             a.update.Wait()
+        a.updated = false
         }
         a.update.L.Unlock()
 
