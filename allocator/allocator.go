@@ -1,9 +1,14 @@
 package allocator
 
 import (
+    "bytes"
     "fmt"
     "net"
     "sync"
+    "os"
+    "path"
+    "io/ioutil"
+    "encoding/gob"
     "github.com/nategraf/mini-ipam-driver/bytop"
 )
 
@@ -20,6 +25,8 @@ type Allocator interface {
 
 const NilAS = "null"
 
+var localBackup = path.Join(os.TempDir(), "mini-ipam.gob")
+
 func AddrSpace(a Allocator) string {
     if a == nil {
         return NilAS
@@ -32,16 +39,33 @@ func AddrSpace(a Allocator) string {
 type LocalAllocator struct{
     pools [][]*net.IPNet
     allocated map[string]bool
-    lock sync.Mutex
+    lock sync.RWMutex
+    update *sync.Cond
+    updated bool
 }
 
 // NewLocalAllocator creates and initializes a new LocalAllocator
 func NewLocalAllocator() *LocalAllocator {
-    return &LocalAllocator{
-        pools: make([][]*net.IPNet, 32),
-        allocated: make(map[string]bool),
-        lock: sync.Mutex{},
-    }
+    a := &LocalAllocator{}
+    a.init()
+    return a
+}
+
+// NewLocalAllocator creates and initializes a new LocalAllocator
+func LoadLocalAllocator() (*LocalAllocator, error) {
+    a := &LocalAllocator{}
+    err := a.load()
+    return a, err
+}
+
+func (a *LocalAllocator) init() {
+    a.pools = make([][]*net.IPNet, 32)
+    a.allocated = make(map[string]bool)
+    a.lock = sync.RWMutex{}
+    a.update = sync.NewCond(a.lock.RLocker())
+    a.updated = false
+
+    go a.autosave()
 }
 
 func (a *LocalAllocator) addrSpace() string {
@@ -78,6 +102,7 @@ func (a *LocalAllocator) addPoolNoLock(pool *net.IPNet) error {
         }
     }
     a.pools[masklen] = append(s, pool)
+    a.signalUpdate()
     return nil
 }
 
@@ -100,6 +125,7 @@ func (a *LocalAllocator) RequestPool(masklen int) (*net.IPNet, error) {
         if len(s) > 0 {
             // Pop head
             pool, a.pools[i] = s[0], s[1:]
+
             break
         }
     }
@@ -117,6 +143,7 @@ func (a *LocalAllocator) RequestPool(masklen int) (*net.IPNet, error) {
     }
 
     a.allocated[pool.String()] = true
+    a.signalUpdate()
     return pool, nil
 }
 
@@ -127,6 +154,7 @@ func (a *LocalAllocator) ReleasePool(pool *net.IPNet) error {
     if a.allocated[pool.String()] {
         a.addPoolNoLock(pool)
         delete(a.allocated, pool.String())
+        a.signalUpdate()
         return nil
     } else {
         return fmt.Errorf("Pool was never allocated: %s", pool.String())
@@ -151,7 +179,7 @@ func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) (net.IP, err
 
         return nil, fmt.Errorf("Cannot allocate %s from pool %s", ip.String(), pool.String())
     } else {
-        ip = pool.IP.To4()
+        ip = bytop.Copy(pool.IP.To4())
         if ip == nil {
             // Not a v4 address
             return nil, fmt.Errorf("Pool is not a valid IPv4 subet: %s", pool.String())
@@ -163,6 +191,7 @@ func (a *LocalAllocator) RequestAddress(pool *net.IPNet, ip net.IP) (net.IP, err
         for ; !bytop.Equal(ip, limit); bytop.Add(ip, 1, ip) {
             if !a.allocated[ip.String()] {
                 a.allocated[ip.String()] = true
+                a.signalUpdate()
                 return ip, nil
             }
         }
@@ -182,15 +211,119 @@ func (a *LocalAllocator) ReleaseAddress(ip net.IP) error {
 
     if a.allocated[ip.String()] {
         delete(a.allocated, ip.String())
+        a.signalUpdate()
         return nil
     } else {
         return fmt.Errorf("IP address was never allocated: %s", ip.String())
     }
 }
 
+func (a *LocalAllocator) Dump() map[string][]string {
+    a.lock.RLock()
+    defer a.lock.RUnlock()
+
+    dump := make(map[string][]string)
+
+    for _, s := range a.pools {
+        for _, pool := range s {
+            dump["free"] = append(dump["free"], pool.String())
+        }
+    }
+
+    for val, _ := range a.allocated {
+        dump["allocated"] = append(dump["allocated"], val)
+    }
+
+    return dump
+}
+
+// Save the allocator's current state to a file
+func (a *LocalAllocator) save() error {
+    dump := a.Dump()
+
+    b := bytes.Buffer{}
+    e := gob.NewEncoder(&b)
+    err := e.Encode(dump)
+    if err != nil {
+        return err
+    }
+
+    return ioutil.WriteFile(localBackup, b.Bytes(), 0644)
+}
+
+func (a *LocalAllocator) signalUpdate() {
+    a.updated = true
+    a.update.Signal()
+}
+
+func (a *LocalAllocator) autosave() error {
+    for {
+        a.update.L.Lock()
+        for !a.updated {
+            a.update.Wait()
+        }
+        a.update.L.Unlock()
+
+        a.save()
+    }
+}
+
+// Load a saved allocator state
+func (a *LocalAllocator) load() error {
+    data, err := ioutil.ReadFile(localBackup)
+    if err != nil {
+        return err
+    }
+
+    b := bytes.Buffer{}
+    b.Write(data)
+
+    dump := make(map[string][]string)
+    d := gob.NewDecoder(&b)
+    err = d.Decode(&dump)
+    if err != nil {
+        return err
+    }
+
+    // Set this object to the initial state
+    a.init()
+
+    a.lock.Lock()
+    defer a.lock.Unlock()
+
+
+    // Set the allocator state to the loaded dump
+    for _, str := range dump["free"] {
+        _, pool, err := net.ParseCIDR(str)
+        if err != nil {
+            return err
+        }
+        pool = normalizePool(pool)
+        if pool == nil {
+            return fmt.Errorf("Read non-v4 IP address")
+        }
+
+        masklen, _ := pool.Mask.Size()
+        a.pools[masklen] = append(a.pools[masklen], pool)
+    }
+
+    for _, str := range dump["allocated"] {
+        a.allocated[str] = true
+    }
+
+    return nil
+}
+
+
+
 // Creates a copy of an ipnet, and ensures the IP component is the network address
 func normalizePool(ipnet *net.IPNet) *net.IPNet {
-    ip := bytop.And(ipnet.IP.To4(), ipnet.Mask, nil)
+    ip := ipnet.IP.To4()
+    if ip == nil {
+        return nil
+    }
+
+    ip = bytop.And(ip, ipnet.Mask, nil)
     return &net.IPNet{ IP: ip, Mask: bytop.Copy(ipnet.Mask) }
 }
 

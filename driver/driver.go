@@ -221,14 +221,26 @@ func (d *driver) GetCapabilities() (res *ipam.CapabilitiesResponse, err error) {
 }
 
 func main() {
-    d := &driver{ Local: alloc.NewLocalAllocator(), Global: nil }
-    for _, pool := range defaultPools {
-        err := d.Local.AddPool(pool)
-        if err != nil {
-            log.Fatalf("Failed to add pool: %s", pool.String())
+    a, err := alloc.LoadLocalAllocator()
+    if err == nil {
+        log.Printf("Successfully loaded allocator state")
+        dump := a.Dump()
+        log.Printf("Free pools: %s", dump["free"])
+        log.Printf("Allocated: %s", dump["allocated"])
+    } else {
+        log.Printf("Failed to load allocator state from file: %s", err)
+
+        a = alloc.NewLocalAllocator()
+        for _, pool := range defaultPools {
+            err := a.AddPool(pool)
+            if err != nil {
+                log.Fatalf("Failed to add pool: %s", pool.String())
+            }
+            log.Printf("Added pool to allocator: %s", pool.String())
         }
-        log.Printf("Added pool to allocator: %s", pool.String())
     }
+
+    d := &driver{ Local: a, Global: nil }
     h := ipam.NewHandler(d)
     h.ServeUnix(socketAddress, 0)
 }
