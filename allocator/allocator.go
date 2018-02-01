@@ -11,7 +11,7 @@ type Allocator interface {
     addrSpace() string
 
     AddPool(*net.IPNet) error
-    RequestPool(int) (*net.IPNet, error)
+    RequestPool(int, *net.IPNet) (*net.IPNet, error)
     ReleasePool(*net.IPNet) error
     RequestAddress(*net.IPNet, net.IP) (net.IP, error)
     ReleaseAddress(net.IP) error
@@ -28,7 +28,7 @@ func AddrSpace(a Allocator) string {
 
 // LocalAllocator is an allocator which stores data in process memory.
 // It does not use an external data store and therefore cannot be used across a cluster.
-type LocalAllocator struct{
+type LocalAllocator struct {
     pools [][]*net.IPNet
     allocated map[string]bool
 }
@@ -73,8 +73,11 @@ func (a *LocalAllocator) AddPool(pool *net.IPNet) error {
 
 // RequestPool allocates a pool of the requested size.
 // nil is returned if the request cannnot be fulfiled.
-func (a *LocalAllocator) RequestPool(masklen int) (*net.IPNet, error) {
-    var pool *net.IPNet
+func (a *LocalAllocator) RequestPool(masklen int, pool *net.IPNet) (*net.IPNet, error) {
+    if pool != nil {
+        return nil, fmt.Errorf("LocalAllocator does not (currently) implement specific pool requests")
+    }
+
     var i int
 
     if masklen < 0 || masklen > 31 {

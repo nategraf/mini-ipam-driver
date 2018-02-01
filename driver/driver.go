@@ -102,7 +102,7 @@ func (d *driver) RequestPool(req *ipam.RequestPoolRequest) (*ipam.RequestPoolRes
         return nil, logError("RequestPool", err)
     }
 
-    pool, err := a.RequestPool(defaultMasklen)
+    pool, err := a.RequestPool(defaultMasklen, nil)
     if err != nil {
         return nil, logError("RequestPool", types.InternalErrorf("Allocation failed: %s", err))
     }
