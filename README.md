@@ -20,7 +20,7 @@ There is one driver option `CidrMaskLength` which allows you to set the subnet m
 You can create scripts around this to have it start on boot (e.g. with `upstart` or `cron @reboot`) to make things easier.
 
 ## Installation as a service with SysV (Debian/Ubuntu)
-(You will be installing these things as `root` so don't just trust me, look at the scipts and source code)
+(You will be installing these things as root so don't just trust me, look at the scipts and source code)
 ```bash
 # Download the service script and install it to init.d
 sudo curl -L https://raw.githubusercontent.com/nategraf/mini-ipam-driver/master/sysv.sh -o /etc/init.d/mini-ipam
