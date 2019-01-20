@@ -15,7 +15,7 @@ Right now installation is pretty much self-guided:
 2. Run `sudo ./driver`
 3. Start using the driver! (e.g. `docker network create "foo" --ipam-driver mini`)
 
-There is one driver option `CidrMaskLength` which allows you to set the subnet mask length for the request subnet to an integer between 0 and 31 inclusive to control subet size.
+There is one driver option `com.github.mini.cidr_mask_length` which allows you to set the subnet mask length for the request subnet to an integer between 0 and 31 inclusive to control subet size.
 
 You can create scripts around this to have it start on boot (e.g. with `upstart` or `cron @reboot`) to make things easier.
 
