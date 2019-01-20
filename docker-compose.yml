@@ -1,0 +1,21 @@
+version: '2.4'
+
+services:
+    alice:
+        image: busybox
+        command: ifconfig
+
+    bob:
+        image: busybox
+        command: ifconfig
+
+    charlie:
+        image: busybox
+        command: ifconfig
+
+networks:
+    default:
+        ipam:
+            driver: mini
+            options:
+                com.github.mini.cidr_mask_length: "29"
