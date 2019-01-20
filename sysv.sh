@@ -12,7 +12,7 @@
 
 NAME="mini-ipam"
 PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
-APPBIN="/usr/sbin/mini-ipam"
+APPBIN="/usr/local/bin/mini-ipam"
 APPARGS=""
 
 # Needs to run as root to talk to Docker
