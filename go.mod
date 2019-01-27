@@ -1,6 +1,7 @@
 module github.com/nategraf/mini-ipam-driver
 
 require (
+	github.com/Microsoft/go-winio v0.4.11 // indirect
 	github.com/coreos/go-systemd v0.0.0-20181031085051-9002847aa142 // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-plugins-helpers v0.0.0-20181025120712-1e6269c305b8

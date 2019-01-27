@@ -1,18 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
-export GOARCH=amd64
-export GOOS=linux
-go build -o mini-ipam-driver.Linux.x64
+cd "$( dirname "${BASH_SOURCE[0]}" )"
+mkdir -p ./bin
 
-export GOARCH=386
-go build -o mini-ipam-driver.Linux.x86
-
-export GOOS=windows
-go build -o mini-ipam-driver.Windows.x86.exe
-
-export GOARCH=amd64
-go build -o mini-ipam-driver.Windows.x64.exe
-
-export GOARCH=
-export GOOS=
+for arch in "amd64" "386"; do
+    for os in "linux" "windows"; do
+        export GOARCH="$arch"
+        export GOOS="$os"
+        go build -o bin/mini-ipam-driver.$os.$arch
+    done
+done
