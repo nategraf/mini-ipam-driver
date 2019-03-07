@@ -32,6 +32,11 @@ sudo chmod +x /usr/local/bin/mini-ipam
 # Activate the service
 sudo update-rc.d mini-ipam defaults
 sudo service mini-ipam start
+
+# Verify that it is running
+sudo stat /run/docker/plugins/mini.sock
+#  File: /run/docker/plugins/mini.sock
+#  Size: 0               Blocks: 0          IO Block: 4096   socket
 ```
 or
 ```
