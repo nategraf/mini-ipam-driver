@@ -20,19 +20,18 @@ There is one driver option `com.github.mini.cidr_mask_length` which allows you t
 You can create scripts around this to have it start on boot (e.g. with `upstart` or `cron @reboot`) to make things easier.
 
 ## Installation as a service with SysV (Debian/Ubuntu)
-(You will be installing these things as root so don't just trust me, look at the scipts and source code)
 ```bash
 # Download the service script and install it to init.d
 sudo curl -L https://raw.githubusercontent.com/nategraf/mini-ipam-driver/master/sysv.sh -o /etc/init.d/mini-ipam
 sudo chmod +x /etc/init.d/mini-ipam
 
 # Download the driver to usr/local/bin
-sudo curl -L https://github.com/nategraf/mini-ipam-driver/releases/download/v1.0.2/mini-ipam-driver.Linux.x64 -o /usr/local/bin/mini-ipam
+sudo curl -L https://github.com/nategraf/mini-ipam-driver/releases/latest/download/mini-ipam-driver.linux.x64 -o /usr/local/bin/mini-ipam
 sudo chmod +x /usr/local/bin/mini-ipam
 
 # Activate the service
 sudo update-rc.d mini-ipam defaults
-service mini-ipam start
+sudo service mini-ipam start
 ```
 or
 ```
