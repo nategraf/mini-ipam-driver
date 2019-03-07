@@ -26,7 +26,7 @@ sudo curl -L https://raw.githubusercontent.com/nategraf/mini-ipam-driver/master/
 sudo chmod +x /etc/init.d/mini-ipam
 
 # Download the driver to usr/local/bin
-sudo curl -L https://github.com/nategraf/mini-ipam-driver/releases/latest/download/mini-ipam-driver.linux.x64 -o /usr/local/bin/mini-ipam
+sudo curl -L https://github.com/nategraf/mini-ipam-driver/releases/latest/download/mini-ipam-driver.linux.amd64 -o /usr/local/bin/mini-ipam
 sudo chmod +x /usr/local/bin/mini-ipam
 
 # Activate the service
