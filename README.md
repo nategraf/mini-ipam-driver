@@ -37,6 +37,7 @@ sudo service mini-ipam start
 sudo stat /run/docker/plugins/mini.sock
 #  File: /run/docker/plugins/mini.sock
 #  Size: 0               Blocks: 0          IO Block: 4096   socket
+#  ...
 ```
 or
 ```
