@@ -6,8 +6,8 @@
 # Required-Stop:     $local_fs $network $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: Example
-# Description:       Mini-ipam driver allocates small networks for libnetwork
+# Short-Description: mini-ipam driver
+# Description:       mini-ipam driver allocates small networks for libnetwork
 ### END INIT INFO
 
 NAME="mini-ipam"
